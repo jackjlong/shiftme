@@ -4,17 +4,17 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="theme-color" content="#102b28">
-    <meta name="description" content="A private, browser-local ledger for shift hours, tips, and estimated pay.">
+    <meta name="description" content="Track shift hours and tips, then compare the week with your paystub.">
     <link rel="icon" type="image/svg+xml" href="./favicon.svg">
-    <title>Shift Ledger</title>
+    <title>shiftme</title>
     <link rel="stylesheet" href="./styles.css">
     <script type="module" src="./app.mjs"></script>
   </head>
   <body>
     <div class="site-shell">
       <header class="masthead">
-        <div class="brand"><span class="brand-mark">SL</span><span>Shift Ledger</span></div>
-        <span class="privacy-note"><span class="privacy-dot"></span> Saved on this laptop</span>
+        <div class="brand"><span class="brand-mark">sm</span><span>shiftme</span></div>
+        <span class="privacy-note"><span class="privacy-dot"></span> Entries stay in this browser</span>
       </header>
 
       <main>
@@ -22,7 +22,7 @@
           <div>
             <p class="eyebrow">Your work, in numbers</p>
             <h1 id="page-title">Know what each shift earned.</h1>
-            <p class="intro-copy">Log hours, tips, and base hourly wage. See a simple estimate of gross pay for each shift and each Monday–Sunday week.</p>
+            <p class="intro-copy">Log completed shifts as you go. At the end of the week, compare your totals with your paystub.</p>
           </div>
           <div class="intro-stamp" aria-hidden="true"><span>01</span><span>HOURS + TIPS</span><span>YOUR LEDGER</span></div>
         </section>
@@ -32,6 +32,15 @@
         <section class="workbench" aria-label="Shift entry and latest week">
           <div class="form-panel">
             <div class="section-heading"><p class="eyebrow">01 / Record</p><h2 id="form-title">Add a shift</h2></div>
+            <form id="rate-form" class="rate-form" novalidate>
+              <label for="base-rate">Your base hourly rate</label>
+              <div class="rate-controls">
+                <div class="money-input"><span aria-hidden="true">$</span><input id="base-rate" type="number" min="0" step="0.01" inputmode="decimal" placeholder="Set once" required></div>
+                <button class="text-button" type="submit">Save rate</button>
+              </div>
+              <p class="rate-help">Saved for future shifts. Existing shifts keep their original rate.</p>
+              <p class="form-status" id="rate-status" role="status" aria-live="polite"></p>
+            </form>
             <form id="shift-form" novalidate>
               <div class="form-grid">
                 <div class="field field-date">
@@ -49,13 +58,7 @@
                   <div class="money-input"><span aria-hidden="true">$</span><input id="shift-tips" name="tips" type="number" min="0" step="0.01" inputmode="decimal" placeholder="82.50" required></div>
                   <span class="field-error" id="tips-error"></span>
                 </div>
-                <div class="field">
-                  <label for="shift-wage">Base hourly wage</label>
-                  <div class="money-input"><span aria-hidden="true">$</span><input id="shift-wage" name="wage" type="number" min="0" step="0.01" inputmode="decimal" placeholder="15.00" required></div>
-                  <span class="field-error" id="wage-error"></span>
-                </div>
               </div>
-              <p class="formula-note">Estimated gross = hours × base hourly wage + tips. Before taxes or deductions.</p>
               <div class="form-actions">
                 <button class="primary-button" id="save-button" type="submit">Save shift <span aria-hidden="true">↗</span></button>
                 <button class="text-button" id="cancel-button" type="button" hidden>Cancel edit</button>
@@ -75,7 +78,7 @@
               <div><span>Base pay</span><strong id="latest-base">$0.00</strong></div>
               <div><span>Effective hourly</span><strong id="latest-effective">$0.00</strong></div>
             </div>
-            <p class="summary-foot">Effective hourly = weekly gross ÷ weekly hours.</p>
+            <p class="summary-foot">Shift estimates use the base rate saved when you logged each shift. Paystub figures can differ.</p>
           </div>
         </section>
 
@@ -87,8 +90,22 @@
           <div id="week-list" class="week-list"><p class="empty-state">Your first saved shift will appear here.</p></div>
         </section>
 
+        <section class="history-section reconcile-section" aria-labelledby="reconcile-title">
+          <div class="section-heading"><p class="eyebrow">04 / Compare</p><h2 id="reconcile-title">Reconcile a paystub</h2></div>
+          <p class="section-copy">Enter the totals printed on a Monday–Sunday paystub. The difference shows paystub minus logged shifts.</p>
+          <form id="stub-form" class="stub-form" novalidate>
+            <div class="field"><label for="stub-start">Week starting Monday</label><select id="stub-start" required></select><span class="field-error" id="start-error"></span></div>
+            <div class="field"><label for="stub-hours">Paystub hours</label><input id="stub-hours" type="number" min="0" step="0.01" inputmode="decimal" required><span class="field-error" id="stub-hours-error"></span></div>
+            <div class="field"><label for="stub-tips">Paystub tips</label><div class="money-input"><span aria-hidden="true">$</span><input id="stub-tips" type="number" min="0" step="0.01" inputmode="decimal" required></div><span class="field-error" id="stub-tips-error"></span></div>
+            <div class="field"><label for="stub-gross">Paystub gross pay</label><div class="money-input"><span aria-hidden="true">$</span><input id="stub-gross" type="number" min="0" step="0.01" inputmode="decimal" required></div><span class="field-error" id="stub-gross-error"></span></div>
+            <button class="primary-button" type="submit">Save paystub totals <span aria-hidden="true">↗</span></button>
+          </form>
+          <p class="form-status" id="stub-status" role="status" aria-live="polite"></p>
+          <div id="stub-result" class="stub-result" aria-live="polite"></div>
+        </section>
+
         <section class="history-section shifts-section" aria-labelledby="shifts-title">
-          <div class="section-heading"><p class="eyebrow">04 / The details</p><h2 id="shifts-title">Your shifts</h2></div>
+          <div class="section-heading"><p class="eyebrow">05 / The details</p><h2 id="shifts-title">Your shifts</h2></div>
           <div class="table-wrap">
             <table>
               <thead><tr><th>Date</th><th>Hours</th><th>Tips</th><th>Base / hr</th><th>Est. gross</th><th>Effective / hr</th><th><span class="sr-only">Actions</span></th></tr></thead>
@@ -98,7 +115,7 @@
         </section>
       </main>
 
-      <footer><span>Shift Ledger · Private, local-first</span><span>Estimates only. No overtime, taxes, or deductions calculated.</span></footer>
+      <footer><span>shiftme · Your entries stay in this browser</span><span>No overtime, taxes, or deductions calculated.</span></footer>
     </div>
   </body>
 </html>

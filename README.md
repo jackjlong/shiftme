@@ -1,35 +1,25 @@
-# Shift Ledger
+# shiftme
 
-A laptop tool for tracking shift hours, tips, and estimated gross pay. The code is public; your entries stay in this browser's local storage. No account or paid service is required.
+Track completed shifts, then compare the week's hours, tips, and gross pay with a paystub.
 
-![Shift Ledger showing weekly totals with illustrative data](docs/demo.png)
-
-Screenshot values are illustrative. Real earnings and paystubs are not committed.
+**Live app:** https://jackjlong.github.io/shiftme/
 
 ## Use it
 
-On a Mac, double-click **Open Shift Ledger.command**. It starts a local server and opens the page in your default browser. Keep the Terminal window open while using it. Use the same browser each time so it can find your saved entries.
+Save your base hourly rate once. For each completed shift, enter its date, hours, and tips. The rate is saved in your browser and attached to new shifts; changing it later does not rewrite older shifts. At the end of a Monday–Sunday week, enter the paystub's hours, tips, and gross pay. shiftme shows the difference between the paystub and the logged shifts.
 
-Or, from this folder, run:
+Entries and paystub totals stay in that browser's local storage. The public site has no account or server database. Data does not sync across browsers or devices, and clearing browser data can erase it. **Export CSV** saves a copy of shift entries; it does not currently include paystub totals.
 
-```sh
-python3 serve.py
-```
+Gross and hourly figures from logged shifts are estimates before taxes or deductions. Paystubs may include adjustments or pay lines this app does not calculate. The app does not read PDF paystubs automatically.
 
-Open `http://127.0.0.1:8765/` in your laptop browser if it does not open automatically. Enter the shift date, hours worked, tips, and base hourly wage, then select **Save shift**. Use **Edit** or **Delete** to correct an entry. **Export CSV** downloads a spreadsheet-friendly copy.
+## Run locally
 
-The page shows estimated gross pay for each shift and totals for Monday–Sunday weeks. Effective hourly pay is gross pay divided by hours. Weekly effective hourly pay uses total weekly gross divided by total weekly hours, so it properly weights shifts of different lengths.
+On a Mac, double-click **Open shiftme.command** and keep its Terminal window open. Or run `python3 serve.py` here and open `http://127.0.0.1:8765/`. Browser storage for the local address is separate from storage on the live site.
 
-All calculations are estimates before taxes or deductions. The app does not calculate overtime, shift differentials, withholding, or pay-stub reconciliation. Browser storage does not sync between browsers or devices and may be lost if browser data is cleared; export a CSV copy for records you want to keep. CSV import is not implemented.
-
-## Check the calculations
+## Check
 
 ```sh
 node --test ledger.test.mjs
 ```
 
-No package installation is needed. The calculation module is `ledger.mjs`; `app.mjs` handles the interface and browser storage; `styles.css` handles layout.
-
-## Verification
-
-The three tests cover shift pay, hour-weighted weekly totals across a Monday boundary, and invalid entries. The local browser flow was checked for saving, reload persistence, editing, deletion, validation, and CSV export. A real completed shift and a separate paystub total were checked privately; their details are not in this repository.
+No package installation is needed. `ledger.mjs` contains the calculations; `app.mjs` handles the interface and browser storage. The tests cover shift pay, weekly totals, input validation, and paystub comparison. Personal paystubs and real earnings are not in this repository.

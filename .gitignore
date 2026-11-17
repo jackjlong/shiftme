@@ -4,7 +4,6 @@ __pycache__/
 *.csv
 *.pdf
 *.png
-!docs/demo.png
 Paystub*
 paystub*
 local-data/

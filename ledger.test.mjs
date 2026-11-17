@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { calculateShift, summarizeWeeks, validateEntry } from './ledger.mjs';
+import { calculateShift, reconcileWeek, summarizeWeeks, validateEntry, validatePaystub } from './ledger.mjs';
 
 test('a shift combines base wages and tips into effective hourly pay', () => {
   const result = calculateShift({
@@ -39,4 +39,18 @@ test('invalid shift values are rejected before they can enter the ledger', () =>
   assert.equal(validateEntry({ ...valid, tips: -1 }).ok, false);
   assert.equal(validateEntry({ ...valid, wage: -1 }).ok, false);
   assert.equal(validateEntry(valid).ok, true);
+});
+
+test('a paystub compares its totals with the shifts from the same week', () => {
+  const week = summarizeWeeks([
+    { date: '2026-11-16', hours: 5, tips: 80, wage: 13.8 },
+    { date: '2026-11-22', hours: 4, tips: 60, wage: 13.8 },
+  ])[0];
+  const stub = { start: '2026-11-16', hours: 9, tips: 140, gross: 264.2 };
+
+  assert.equal(validatePaystub(stub).ok, true);
+  assert.equal(reconcileWeek(week, stub).matches, true);
+  assert.deepEqual(reconcileWeek(week, { ...stub, hours: 9.25, gross: 270 }).difference,
+    { hours: 0.25, tips: 0, gross: 5.8 });
+  assert.equal(validatePaystub({ ...stub, start: '2026-11-17' }).ok, false);
 });

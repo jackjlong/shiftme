@@ -1,6 +1,8 @@
-import { calculateShift, summarizeWeeks, validateEntry } from './ledger.mjs';
+import { calculateShift, reconcileWeek, summarizeWeeks, validateEntry, validatePaystub } from './ledger.mjs';
 
 const STORAGE_KEY = 'ship-daily.shift-ledger.v1';
+const RATE_KEY = 'ship-daily.shift-ledger.rate.v1';
+const STUB_KEY = 'ship-daily.shift-ledger.paystubs.v1';
 const currency = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
 const hourFormat = new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 });
 const dateFormat = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
@@ -11,8 +13,19 @@ const fields = {
   date: document.querySelector('#shift-date'),
   hours: document.querySelector('#shift-hours'),
   tips: document.querySelector('#shift-tips'),
-  wage: document.querySelector('#shift-wage'),
 };
+const rateForm = document.querySelector('#rate-form');
+const rateInput = document.querySelector('#base-rate');
+const rateStatus = document.querySelector('#rate-status');
+const stubForm = document.querySelector('#stub-form');
+const stubFields = {
+  start: document.querySelector('#stub-start'),
+  hours: document.querySelector('#stub-hours'),
+  tips: document.querySelector('#stub-tips'),
+  gross: document.querySelector('#stub-gross'),
+};
+const stubStatus = document.querySelector('#stub-status');
+const stubResult = document.querySelector('#stub-result');
 const message = document.querySelector('#storage-message');
 const status = document.querySelector('#form-status');
 const cancelButton = document.querySelector('#cancel-button');
@@ -51,12 +64,41 @@ function readSavedEntries() {
   }
 }
 
+function readSavedRate(entries) {
+  const raw = localStorage.getItem(RATE_KEY);
+  if (raw !== null) {
+    const rate = Number(raw);
+    if (!Number.isFinite(rate) || rate < 0) throw new Error('Invalid saved rate.');
+    return rate;
+  }
+  return entries.length ? entries.at(-1).wage : null;
+}
+
+function readSavedStubs() {
+  const raw = localStorage.getItem(STUB_KEY);
+  if (!raw) return {};
+  const parsed = JSON.parse(raw);
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed) ||
+      Object.entries(parsed).some(([start, stub]) => start !== stub.start || !validatePaystub(stub).ok)) {
+    throw new Error('Invalid saved paystub totals.');
+  }
+  return parsed;
+}
+
 const saved = readSavedEntries();
 let entries = saved.entries;
 let editingId = null;
 let storageLocked = saved.locked;
+let rate = null;
+let paystubs = {};
+try {
+  rate = readSavedRate(entries);
+  paystubs = readSavedStubs();
+} catch {
+  storageLocked = true;
+}
 fields.date.value = localToday();
-if (entries.length > 0) fields.wage.value = String(entries.at(-1).wage);
+if (rate !== null) rateInput.value = String(rate);
 
 function showStorageMessage(text) {
   message.textContent = text;
@@ -66,15 +108,16 @@ function showStorageMessage(text) {
 if (storageLocked) {
   showStorageMessage('Saved data could not be read. The app has not overwritten it. Export or repair the browser data before adding more shifts.');
   [...form.elements].forEach((element) => { element.disabled = true; });
+  [...rateForm.elements, ...stubForm.elements].forEach((element) => { element.disabled = true; });
 }
 
-function save() {
+function save(key, value) {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(entries));
+    localStorage.setItem(key, JSON.stringify(value));
     message.hidden = true;
     return true;
   } catch {
-    showStorageMessage('This browser could not save your shifts. Entries are visible for this session only. Export CSV to keep a copy.');
+    showStorageMessage('This browser could not save your changes. They are visible for this session only.');
     return false;
   }
 }
@@ -89,11 +132,12 @@ function setErrors(errors) {
 }
 
 function formEntry() {
+  const original = entries.find((entry) => entry.id === editingId);
   return {
     date: fields.date.value,
     hours: fields.hours.value.trim() === '' ? Number.NaN : Number(fields.hours.value),
     tips: fields.tips.value.trim() === '' ? Number.NaN : Number(fields.tips.value),
-    wage: fields.wage.value.trim() === '' ? Number.NaN : Number(fields.wage.value),
+    wage: original?.wage ?? rate ?? Number.NaN,
   };
 }
 
@@ -139,7 +183,56 @@ function renderWeeks(weeks) {
     count.textContent = `${week.shifts} ${week.shifts === 1 ? 'shift' : 'shifts'}`;
     range.append(count);
     row.append(range, stat('Hours', hourFormat.format(week.hours)), stat('Tips', currency.format(week.tips)), stat('Est. gross', currency.format(week.gross)), stat('Effective / hr', currency.format(week.effectiveHourly)));
+    if (paystubs[week.start]) {
+      const marker = document.createElement('span');
+      marker.className = 'stub-marker';
+      marker.textContent = 'Paystub saved';
+      range.append(marker);
+    }
     weekList.append(row);
+  }
+}
+
+function signed(value, format) {
+  return `${value > 0 ? '+' : ''}${format(value)}`;
+}
+
+function renderReconciliation(weeks) {
+  const selected = stubFields.start.value;
+  stubFields.start.replaceChildren();
+  for (const week of weeks) {
+    const option = document.createElement('option');
+    option.value = week.start;
+    option.textContent = rangeFor(week.start);
+    stubFields.start.append(option);
+  }
+  stubFields.start.value = weeks.some((week) => week.start === selected) ? selected : (weeks[0]?.start ?? '');
+  stubFields.start.disabled = weeks.length === 0 || storageLocked;
+  stubForm.querySelector('button').disabled = weeks.length === 0 || storageLocked;
+  const week = weeks.find((item) => item.start === stubFields.start.value);
+  const stub = week && paystubs[week.start];
+  stubResult.replaceChildren();
+  if (!week) {
+    stubResult.textContent = 'Log a completed shift before adding its paystub.';
+    return;
+  }
+  for (const name of ['hours', 'tips', 'gross']) {
+    stubFields[name].value = stub ? String(stub[name]) : '';
+  }
+  if (!stub) {
+    stubResult.textContent = 'No paystub totals saved for this week yet.';
+    return;
+  }
+  const comparison = reconcileWeek(week, stub);
+  const heading = document.createElement('strong');
+  heading.textContent = comparison.matches ? 'Logged totals match the paystub.' : 'Paystub minus logged shifts';
+  const details = document.createElement('p');
+  details.textContent = `Hours ${signed(comparison.difference.hours, hourFormat.format)} · Tips ${signed(comparison.difference.tips, currency.format)} · Gross ${signed(comparison.difference.gross, currency.format)}`;
+  stubResult.append(heading, details);
+  if (!comparison.matches) {
+    const note = document.createElement('small');
+    note.textContent = 'Differences may reflect missing shifts, adjusted hours or tips, or other pay lines.';
+    stubResult.append(note);
   }
 }
 
@@ -198,9 +291,54 @@ function render() {
   const weeks = summarizeWeeks(entries);
   renderSummary(weeks);
   renderWeeks(weeks);
+  renderReconciliation(weeks);
   renderShifts();
   exportButton.disabled = entries.length === 0;
 }
+
+rateForm.addEventListener('submit', (event) => {
+  event.preventDefault();
+  if (storageLocked) return;
+  const value = rateInput.value.trim() === '' ? Number.NaN : Number(rateInput.value);
+  if (!Number.isFinite(value) || value < 0) {
+    rateStatus.textContent = 'Enter a valid hourly rate of 0 or more.';
+    rateInput.focus();
+    return;
+  }
+  rate = value;
+  const persisted = save(RATE_KEY, rate);
+  rateStatus.textContent = persisted ? 'Base rate saved for future shifts.' : 'Base rate saved in this tab only.';
+});
+
+stubFields.start.addEventListener('change', () => {
+  renderReconciliation(summarizeWeeks(entries));
+  stubStatus.textContent = '';
+});
+
+stubForm.addEventListener('submit', (event) => {
+  event.preventDefault();
+  if (storageLocked) return;
+  const stub = { start: stubFields.start.value };
+  for (const name of ['hours', 'tips', 'gross']) {
+    const raw = stubFields[name].value.trim();
+    stub[name] = raw === '' ? Number.NaN : Number(raw);
+  }
+  const validation = validatePaystub(stub);
+  for (const [name, input] of Object.entries(stubFields)) {
+    const error = validation.errors[name] ?? '';
+    input.setAttribute('aria-invalid', String(Boolean(error)));
+    document.querySelector(`#${name === 'start' ? 'start' : `stub-${name}`}-error`).textContent = error;
+  }
+  if (!validation.ok) {
+    stubStatus.textContent = 'Check the highlighted paystub fields.';
+    stubFields[Object.keys(validation.errors)[0]].focus();
+    return;
+  }
+  paystubs[stub.start] = stub;
+  const persisted = save(STUB_KEY, paystubs);
+  render();
+  stubStatus.textContent = persisted ? 'Paystub totals saved.' : 'Paystub totals saved in this tab only.';
+});
 
 form.addEventListener('submit', (event) => {
   event.preventDefault();
@@ -209,8 +347,8 @@ form.addEventListener('submit', (event) => {
   const validation = validateEntry(input);
   setErrors(validation.errors);
   if (!validation.ok) {
-    status.textContent = 'Check the highlighted fields.';
-    fields[Object.keys(validation.errors)[0]].focus();
+    status.textContent = validation.errors.wage ? 'Save your base hourly rate before adding a shift.' : 'Check the highlighted fields.';
+    (fields[Object.keys(validation.errors)[0]] ?? rateInput).focus();
     return;
   }
   if (editingId) {
@@ -219,7 +357,7 @@ form.addEventListener('submit', (event) => {
     entries = [...entries, { ...input, id: crypto.randomUUID() }];
   }
   const action = editingId ? 'updated' : 'saved';
-  const persisted = save();
+  const persisted = save(STORAGE_KEY, entries);
   resetForm();
   render();
   status.textContent = persisted ? `Shift ${action}.` : `Shift ${action} in this tab only. Export CSV to keep a copy.`;
@@ -249,7 +387,7 @@ shiftRows.addEventListener('click', (event) => {
   } else if (button.dataset.action === 'delete' && confirm(`Delete the shift on ${dateFormat.format(dateObject(entry.date))}?`)) {
     entries = entries.filter((item) => item.id !== entry.id);
     if (editingId === entry.id) resetForm();
-    const persisted = save();
+    const persisted = save(STORAGE_KEY, entries);
     render();
     status.textContent = persisted ? 'Shift deleted.' : 'Shift deleted in this tab only. Export CSV to keep a copy.';
   }
@@ -265,7 +403,7 @@ exportButton.addEventListener('click', () => {
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;
-  link.download = `shift-ledger-${localToday()}.csv`;
+  link.download = `shiftme-${localToday()}.csv`;
   link.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
   status.textContent = 'CSV export downloaded.';

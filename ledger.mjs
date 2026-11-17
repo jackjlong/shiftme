@@ -55,3 +55,29 @@ export function summarizeWeeks(entries) {
     .map((week) => ({ ...week, effectiveHourly: week.gross / week.hours }))
     .sort((a, b) => b.start.localeCompare(a.start));
 }
+
+export function validatePaystub(stub) {
+  const errors = {};
+  if (!validDate(stub.start) || mondayOf(stub.start) !== stub.start) {
+    errors.start = 'Choose a Monday.';
+  }
+  for (const field of ['hours', 'tips', 'gross']) {
+    if (!Number.isFinite(stub[field]) || stub[field] < 0) {
+      errors[field] = 'Enter 0 or more.';
+    }
+  }
+  return { ok: Object.keys(errors).length === 0, errors };
+}
+
+export function reconcileWeek(week, stub) {
+  if (!week || !stub) return null;
+  const difference = {
+    hours: Math.round((stub.hours - week.hours) * 100) / 100,
+    tips: roundCents(stub.tips - week.tips),
+    gross: roundCents(stub.gross - week.gross),
+  };
+  return {
+    difference,
+    matches: Object.values(difference).every((value) => value === 0),
+  };
+}
