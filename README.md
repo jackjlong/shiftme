@@ -2,6 +2,10 @@
 
 A laptop tool for tracking shift hours, tips, and estimated gross pay. The code is public; your entries stay in this browser's local storage. No account or paid service is required.
 
+![Shift Ledger showing weekly totals with illustrative data](docs/demo.png)
+
+Screenshot values are illustrative. Real earnings and paystubs are not committed.
+
 ## Use it
 
 On a Mac, double-click **Open Shift Ledger.command**. It starts a local server and opens the page in your default browser. Keep the Terminal window open while using it. Use the same browser each time so it can find your saved entries.
@@ -25,3 +29,7 @@ node --test ledger.test.mjs
 ```
 
 No package installation is needed. The calculation module is `ledger.mjs`; `app.mjs` handles the interface and browser storage; `styles.css` handles layout.
+
+## Verification
+
+The three tests cover shift pay, hour-weighted weekly totals across a Monday boundary, and invalid entries. The local browser flow was checked for saving, reload persistence, editing, deletion, validation, and CSV export. A real completed shift and a separate paystub total were checked privately; their details are not in this repository.
