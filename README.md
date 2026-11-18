@@ -16,12 +16,12 @@ Gross and hourly figures from logged shifts are estimates before taxes or deduct
 
 ## Run locally
 
-On a Mac, double-click **Open shiftme.command** and keep its Terminal window open. Or run `python3 serve.py` here and open `http://127.0.0.1:8765/`. Browser storage for the local address is separate from storage on the live site.
+From this folder, run `python3 -m http.server 8765 --bind 127.0.0.1` and open `http://127.0.0.1:8765/`. Browser storage for the local address is separate from storage on the live site.
 
 ## Check
 
 ```sh
-node --test ledger.test.mjs
+node --test ledger.test.mjs paystub.test.mjs
 ```
 
 No package installation or build step is needed. `ledger.mjs` contains the calculations, `paystub.mjs` parses extracted statement rows, and `app.mjs` handles the interface and browser storage. Mozilla PDF.js 6.5.438 is included under Apache-2.0 in `vendor/pdfjs/`. The seven tests cover shift pay, weekly totals, time and input validation, paystub comparison, and PDF row parsing. Personal paystubs and real earnings are not in this repository.
