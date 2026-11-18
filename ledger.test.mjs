@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { calculateShift, reconcileWeek, summarizeWeeks, validateEntry, validatePaystub } from './ledger.mjs';
+import { calculateShift, reconcileWeek, shiftDuration, summarizeWeeks, validateEntry, validatePaystub } from './ledger.mjs';
 
 test('a shift combines base wages and tips into effective hourly pay', () => {
   const result = calculateShift({
@@ -53,4 +53,14 @@ test('a paystub compares its totals with the shifts from the same week', () => {
   assert.deepEqual(reconcileWeek(week, { ...stub, hours: 9.25, gross: 270 }).difference,
     { hours: 0.25, tips: 0, gross: 5.8 });
   assert.equal(validatePaystub({ ...stub, start: '2026-11-17' }).ok, false);
+});
+
+test('clock times support a same-day and overnight shift without breaking older entries', () => {
+  assert.equal(shiftDuration('09:10', '12:40'), 3.5);
+  assert.equal(shiftDuration('22:00', '02:30'), 4.5);
+  assert.equal(shiftDuration('09:10', '09:10'), null);
+  const original = { date: '2026-11-16', hours: 3.5, tips: 60, wage: 14 };
+  assert.equal(validateEntry(original).ok, true);
+  assert.equal(validateEntry({ ...original, startTime: '09:10', endTime: '12:40' }).ok, true);
+  assert.equal(validateEntry({ ...original, startTime: '09:10', endTime: '' }).ok, false);
 });

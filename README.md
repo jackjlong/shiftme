@@ -6,11 +6,13 @@ Track completed shifts, then compare the week's hours, tips, and gross pay with 
 
 ## Use it
 
-Save your base hourly rate once. For each completed shift, enter its date, hours, and tips. The rate is saved in your browser and attached to new shifts; changing it later does not rewrite older shifts. At the end of a Monday–Sunday week, enter the paystub's hours, tips, and gross pay. shiftme shows the difference between the paystub and the logged shifts.
+Save your base hourly rate once. For each completed shift, enter its date, clock-in and clock-out times, and tips. Hours fill from the times and can be adjusted for unpaid breaks. The rate is attached to each new shift; changing it later does not rewrite older shifts. Older entries without clock times still work.
 
-Entries and paystub totals stay in that browser's local storage. The public site has no account or server database. Data does not sync across browsers or devices, and clearing browser data can erase it. **Export CSV** saves a copy of shift entries; it does not currently include paystub totals.
+At the end of a Monday–Sunday week, choose a Gusto earnings statement PDF. shiftme reads its pay period, hours, paycheck and cash tips, gross pay, and server rate in your browser. Review the extracted totals and save them to see paystub minus logged shifts. Manual entry remains available. A PDF for a week with no logged shifts can be saved; the comparison appears after shifts are entered.
 
-Gross and hourly figures from logged shifts are estimates before taxes or deductions. Paystubs may include adjustments or pay lines this app does not calculate. The app does not read PDF paystubs automatically.
+Entries and paystub totals stay in that browser's local storage. The PDF file itself is neither uploaded nor saved. The public site has no account or server database. Data does not sync across browsers or devices, and clearing browser data can erase it. **Export CSV** saves a copy of shift entries; it does not currently include paystub totals.
+
+Gross and hourly figures from logged shifts are estimates before taxes or deductions. Paystubs may include adjustments or pay lines this app does not calculate. PDF import supports text-based, single-week Gusto earnings statements like the one used during development. Scanned PDFs and other payroll layouts need manual entry.
 
 ## Run locally
 
@@ -22,4 +24,4 @@ On a Mac, double-click **Open shiftme.command** and keep its Terminal window ope
 node --test ledger.test.mjs
 ```
 
-No package installation is needed. `ledger.mjs` contains the calculations; `app.mjs` handles the interface and browser storage. The tests cover shift pay, weekly totals, input validation, and paystub comparison. Personal paystubs and real earnings are not in this repository.
+No package installation or build step is needed. `ledger.mjs` contains the calculations, `paystub.mjs` parses extracted statement rows, and `app.mjs` handles the interface and browser storage. Mozilla PDF.js 6.5.438 is included under Apache-2.0 in `vendor/pdfjs/`. The seven tests cover shift pay, weekly totals, time and input validation, paystub comparison, and PDF row parsing. Personal paystubs and real earnings are not in this repository.

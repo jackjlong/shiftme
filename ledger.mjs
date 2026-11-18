@@ -20,6 +20,13 @@ function mondayOf(dateString) {
 export function validateEntry(entry) {
   const errors = {};
   if (!validDate(entry.date)) errors.date = 'Choose a valid date.';
+  const startTime = entry.startTime ?? '';
+  const endTime = entry.endTime ?? '';
+  if (startTime || endTime) {
+    if (!startTime || !endTime || shiftDuration(startTime, endTime) === null) {
+      errors.times = 'Enter both a valid start and end time.';
+    }
+  }
   if (!Number.isFinite(entry.hours) || entry.hours <= 0 || entry.hours > 24) {
     errors.hours = 'Enter more than 0 and up to 24 hours.';
   }
@@ -30,6 +37,17 @@ export function validateEntry(entry) {
     errors.wage = 'Enter 0 or more for base hourly wage.';
   }
   return { ok: Object.keys(errors).length === 0, errors };
+}
+
+export function shiftDuration(startTime, endTime) {
+  const timePattern = /^([01]\d|2[0-3]):([0-5]\d)$/;
+  const start = timePattern.exec(startTime);
+  const end = timePattern.exec(endTime);
+  if (!start || !end) return null;
+  const startMinutes = Number(start[1]) * 60 + Number(start[2]);
+  const endMinutes = Number(end[1]) * 60 + Number(end[2]);
+  const elapsed = (endMinutes - startMinutes + 1440) % 1440;
+  return elapsed === 0 ? null : Math.round(elapsed / 60 * 100) / 100;
 }
 
 export function calculateShift(entry) {

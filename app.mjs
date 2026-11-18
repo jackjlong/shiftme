@@ -1,4 +1,5 @@
-import { calculateShift, reconcileWeek, summarizeWeeks, validateEntry, validatePaystub } from './ledger.mjs';
+import { calculateShift, reconcileWeek, shiftDuration, summarizeWeeks, validateEntry, validatePaystub } from './ledger.mjs';
+import { parseGustoPaystubRows, rowsFromPdfItems } from './paystub.mjs';
 
 const STORAGE_KEY = 'ship-daily.shift-ledger.v1';
 const RATE_KEY = 'ship-daily.shift-ledger.rate.v1';
@@ -7,10 +8,13 @@ const currency = new Intl.NumberFormat('en-US', { style: 'currency', currency: '
 const hourFormat = new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 });
 const dateFormat = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 const shortDateFormat = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' });
+const shiftDateFormat = new Intl.DateTimeFormat('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
 
 const form = document.querySelector('#shift-form');
 const fields = {
   date: document.querySelector('#shift-date'),
+  startTime: document.querySelector('#shift-start'),
+  endTime: document.querySelector('#shift-end'),
   hours: document.querySelector('#shift-hours'),
   tips: document.querySelector('#shift-tips'),
 };
@@ -26,6 +30,8 @@ const stubFields = {
 };
 const stubStatus = document.querySelector('#stub-status');
 const stubResult = document.querySelector('#stub-result');
+const pdfInput = document.querySelector('#stub-pdf');
+const pdfStatus = document.querySelector('#pdf-status');
 const message = document.querySelector('#storage-message');
 const status = document.querySelector('#form-status');
 const cancelButton = document.querySelector('#cancel-button');
@@ -88,9 +94,11 @@ function readSavedStubs() {
 const saved = readSavedEntries();
 let entries = saved.entries;
 let editingId = null;
+let lastAutoHours = null;
 let storageLocked = saved.locked;
 let rate = null;
 let paystubs = {};
+let pendingStub = null;
 try {
   rate = readSavedRate(entries);
   paystubs = readSavedStubs();
@@ -109,6 +117,7 @@ if (storageLocked) {
   showStorageMessage('Saved data could not be read. The app has not overwritten it. Export or repair the browser data before adding more shifts.');
   [...form.elements].forEach((element) => { element.disabled = true; });
   [...rateForm.elements, ...stubForm.elements].forEach((element) => { element.disabled = true; });
+  pdfInput.disabled = true;
 }
 
 function save(key, value) {
@@ -124,10 +133,11 @@ function save(key, value) {
 
 function setErrors(errors) {
   for (const [key, input] of Object.entries(fields)) {
-    const error = errors[key] ?? '';
+    const isTime = key === 'startTime' || key === 'endTime';
+    const error = isTime ? (errors.times ?? '') : (errors[key] ?? '');
     input.setAttribute('aria-invalid', String(Boolean(error)));
-    input.setAttribute('aria-describedby', error ? `${key}-error` : '');
-    document.querySelector(`#${key}-error`).textContent = error;
+    input.setAttribute('aria-describedby', error ? (isTime ? 'times-error' : `${key}-error`) : '');
+    if (!isTime || key === 'endTime') document.querySelector(`#${isTime ? 'times' : key}-error`).textContent = error;
   }
 }
 
@@ -135,6 +145,8 @@ function formEntry() {
   const original = entries.find((entry) => entry.id === editingId);
   return {
     date: fields.date.value,
+    startTime: fields.startTime.value,
+    endTime: fields.endTime.value,
     hours: fields.hours.value.trim() === '' ? Number.NaN : Number(fields.hours.value),
     tips: fields.tips.value.trim() === '' ? Number.NaN : Number(fields.tips.value),
     wage: original?.wage ?? rate ?? Number.NaN,
@@ -144,8 +156,11 @@ function formEntry() {
 function resetForm() {
   editingId = null;
   fields.date.value = localToday();
+  fields.startTime.value = '';
+  fields.endTime.value = '';
   fields.hours.value = '';
   fields.tips.value = '';
+  lastAutoHours = null;
   document.querySelector('#form-title').textContent = 'Add a shift';
   document.querySelector('#save-button').firstChild.textContent = 'Save shift ';
   cancelButton.hidden = true;
@@ -200,20 +215,23 @@ function signed(value, format) {
 function renderReconciliation(weeks) {
   const selected = stubFields.start.value;
   stubFields.start.replaceChildren();
-  for (const week of weeks) {
+  const starts = [...new Set([...weeks.map((week) => week.start), ...Object.keys(paystubs), ...(pendingStub ? [pendingStub.start] : [])])]
+    .sort((a, b) => b.localeCompare(a));
+  for (const start of starts) {
     const option = document.createElement('option');
-    option.value = week.start;
-    option.textContent = rangeFor(week.start);
+    option.value = start;
+    option.textContent = rangeFor(start);
     stubFields.start.append(option);
   }
-  stubFields.start.value = weeks.some((week) => week.start === selected) ? selected : (weeks[0]?.start ?? '');
-  stubFields.start.disabled = weeks.length === 0 || storageLocked;
-  stubForm.querySelector('button').disabled = weeks.length === 0 || storageLocked;
+  stubFields.start.value = starts.includes(selected) ? selected : (starts[0] ?? '');
+  stubFields.start.disabled = starts.length === 0 || storageLocked;
+  stubForm.querySelector('button').disabled = starts.length === 0 || storageLocked;
   const week = weeks.find((item) => item.start === stubFields.start.value);
-  const stub = week && paystubs[week.start];
+  const imported = pendingStub?.start === stubFields.start.value;
+  const stub = imported ? pendingStub : paystubs[stubFields.start.value];
   stubResult.replaceChildren();
-  if (!week) {
-    stubResult.textContent = 'Log a completed shift before adding its paystub.';
+  if (!stubFields.start.value) {
+    stubResult.textContent = 'Log a shift or choose a paystub PDF to begin.';
     return;
   }
   for (const name of ['hours', 'tips', 'gross']) {
@@ -223,15 +241,19 @@ function renderReconciliation(weeks) {
     stubResult.textContent = 'No paystub totals saved for this week yet.';
     return;
   }
+  if (!week) {
+    stubResult.textContent = imported ? 'PDF totals are ready to save. No shifts are logged for this week yet.' : 'Paystub saved. No shifts are logged for this week yet.';
+    return;
+  }
   const comparison = reconcileWeek(week, stub);
   const heading = document.createElement('strong');
-  heading.textContent = comparison.matches ? 'Logged totals match the paystub.' : 'Paystub minus logged shifts';
+  heading.textContent = imported ? 'PDF totals ready to save' : comparison.matches ? 'Logged totals match the paystub.' : 'Paystub minus logged shifts';
   const details = document.createElement('p');
   details.textContent = `Hours ${signed(comparison.difference.hours, hourFormat.format)} · Tips ${signed(comparison.difference.tips, currency.format)} · Gross ${signed(comparison.difference.gross, currency.format)}`;
   stubResult.append(heading, details);
-  if (!comparison.matches) {
+  if (!comparison.matches || imported) {
     const note = document.createElement('small');
-    note.textContent = 'Differences may reflect missing shifts, adjusted hours or tips, or other pay lines.';
+    note.textContent = imported ? 'Review the extracted totals above, then save them.' : 'Differences may reflect missing shifts, adjusted hours or tips, or other pay lines.';
     stubResult.append(note);
   }
 }
@@ -256,6 +278,19 @@ function actionButton(label, action, entry) {
   return button;
 }
 
+function formattedTime(time) {
+  const [hour, minute] = time.split(':').map(Number);
+  const period = hour < 12 ? 'am' : 'pm';
+  return { clock: `${hour % 12 || 12}:${String(minute).padStart(2, '0')}`, period };
+}
+
+function timeRange(entry) {
+  if (!entry.startTime || !entry.endTime) return 'Time not recorded';
+  const start = formattedTime(entry.startTime);
+  const end = formattedTime(entry.endTime);
+  return `${start.clock}${start.period === end.period ? '' : ` ${start.period}`} to ${end.clock} ${end.period}`;
+}
+
 function renderShifts() {
   shiftRows.replaceChildren();
   if (entries.length === 0) {
@@ -272,7 +307,15 @@ function renderShifts() {
   for (const entry of sorted) {
     const shift = calculateShift(entry);
     const row = document.createElement('tr');
-    for (const text of [dateFormat.format(dateObject(entry.date)), hourFormat.format(entry.hours), currency.format(entry.tips), currency.format(entry.wage), currency.format(shift.gross), currency.format(shift.effectiveHourly)]) {
+    const dateCell = document.createElement('td');
+    const day = document.createElement('strong');
+    day.textContent = shiftDateFormat.format(dateObject(entry.date));
+    const times = document.createElement('span');
+    times.className = 'shift-times';
+    times.textContent = timeRange(entry);
+    dateCell.append(day, times);
+    row.append(dateCell);
+    for (const text of [hourFormat.format(entry.hours), currency.format(entry.tips), currency.format(entry.wage), currency.format(shift.gross), currency.format(shift.effectiveHourly)]) {
       const cell = document.createElement('td');
       cell.textContent = text;
       row.append(cell);
@@ -286,6 +329,17 @@ function renderShifts() {
     shiftRows.append(row);
   }
 }
+
+for (const field of [fields.startTime, fields.endTime]) {
+  field.addEventListener('input', () => {
+    const duration = shiftDuration(fields.startTime.value, fields.endTime.value);
+    if (duration !== null && (fields.hours.value === '' || fields.hours.value === lastAutoHours)) {
+      fields.hours.value = String(duration);
+      lastAutoHours = fields.hours.value;
+    }
+  });
+}
+fields.hours.addEventListener('input', () => { lastAutoHours = null; });
 
 function render() {
   const weeks = summarizeWeeks(entries);
@@ -315,6 +369,44 @@ stubFields.start.addEventListener('change', () => {
   stubStatus.textContent = '';
 });
 
+pdfInput.addEventListener('change', async () => {
+  const file = pdfInput.files?.[0];
+  if (!file || storageLocked) return;
+  if (file.size > 10_000_000) {
+    pdfStatus.textContent = 'Choose a PDF smaller than 10 MB.';
+    return;
+  }
+  pdfStatus.textContent = 'Reading PDF in this browser…';
+  try {
+    const data = new Uint8Array(await file.arrayBuffer());
+    if (new TextDecoder().decode(data.slice(0, 5)) !== '%PDF-') throw new Error('This file is not a PDF.');
+    const pdfjs = await import('./vendor/pdfjs/pdf.min.mjs');
+    pdfjs.GlobalWorkerOptions.workerSrc = new URL('./vendor/pdfjs/pdf.worker.min.mjs', import.meta.url).href;
+    const loadingTask = pdfjs.getDocument({ data });
+    let parsed;
+    try {
+      const pdf = await loadingTask.promise;
+      const rows = [];
+      for (let pageNumber = 1; pageNumber <= Math.min(pdf.numPages, 3); pageNumber++) {
+        const page = await pdf.getPage(pageNumber);
+        rows.push(...rowsFromPdfItems((await page.getTextContent()).items));
+      }
+      parsed = parseGustoPaystubRows(rows);
+    } finally {
+      await loadingTask.destroy();
+    }
+    if (!validatePaystub(parsed).ok) throw new Error('Could not validate the extracted totals.');
+    pendingStub = parsed;
+    renderReconciliation(summarizeWeeks(entries));
+    stubFields.start.value = parsed.start;
+    renderReconciliation(summarizeWeeks(entries));
+    pdfStatus.textContent = `Read ${rangeFor(parsed.start)} from the PDF${parsed.rate === null ? '' : `; server rate ${currency.format(parsed.rate)}/hr`}. Review the totals, then save.`;
+    stubStatus.textContent = '';
+  } catch (error) {
+    pdfStatus.textContent = `${error.message} You can enter the paystub totals below instead.`;
+  }
+});
+
 stubForm.addEventListener('submit', (event) => {
   event.preventDefault();
   if (storageLocked) return;
@@ -334,6 +426,13 @@ stubForm.addEventListener('submit', (event) => {
     stubFields[Object.keys(validation.errors)[0]].focus();
     return;
   }
+  if (rate === null && pendingStub?.start === stub.start && pendingStub.rate !== null) {
+    rate = pendingStub.rate;
+    rateInput.value = String(rate);
+    save(RATE_KEY, rate);
+    rateStatus.textContent = 'Base rate saved from your paystub.';
+  }
+  pendingStub = null;
   paystubs[stub.start] = stub;
   const persisted = save(STUB_KEY, paystubs);
   render();
@@ -348,7 +447,7 @@ form.addEventListener('submit', (event) => {
   setErrors(validation.errors);
   if (!validation.ok) {
     status.textContent = validation.errors.wage ? 'Save your base hourly rate before adding a shift.' : 'Check the highlighted fields.';
-    (fields[Object.keys(validation.errors)[0]] ?? rateInput).focus();
+    (validation.errors.times ? fields.startTime : fields[Object.keys(validation.errors)[0]] ?? rateInput).focus();
     return;
   }
   if (editingId) {
@@ -376,7 +475,8 @@ shiftRows.addEventListener('click', (event) => {
   if (!entry) return;
   if (button.dataset.action === 'edit') {
     editingId = entry.id;
-    for (const key of Object.keys(fields)) fields[key].value = String(entry[key]);
+    for (const key of Object.keys(fields)) fields[key].value = String(entry[key] ?? '');
+    lastAutoHours = null;
     document.querySelector('#form-title').textContent = 'Edit shift';
     document.querySelector('#save-button').firstChild.textContent = 'Save changes ';
     cancelButton.hidden = false;
@@ -394,10 +494,10 @@ shiftRows.addEventListener('click', (event) => {
 });
 
 exportButton.addEventListener('click', () => {
-  const header = 'date,hours,tips,base_hourly_wage,base_pay,estimated_gross,effective_hourly';
+  const header = 'date,start_time,end_time,hours,tips,base_hourly_wage,base_pay,estimated_gross,effective_hourly';
   const lines = [...entries].sort((a, b) => a.date.localeCompare(b.date)).map((entry) => {
     const shift = calculateShift(entry);
-    return [entry.date, entry.hours, entry.tips, entry.wage, shift.basePay, shift.gross, shift.effectiveHourly.toFixed(2)].join(',');
+    return [entry.date, entry.startTime ?? '', entry.endTime ?? '', entry.hours, entry.tips, entry.wage, shift.basePay, shift.gross, shift.effectiveHourly.toFixed(2)].join(',');
   });
   const blob = new Blob([[header, ...lines].join('\n') + '\n'], { type: 'text/csv;charset=utf-8' });
   const url = URL.createObjectURL(blob);

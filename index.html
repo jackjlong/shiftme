@@ -49,6 +49,15 @@
                   <span class="field-error" id="date-error"></span>
                 </div>
                 <div class="field">
+                  <label for="shift-start">Clock in</label>
+                  <input id="shift-start" name="startTime" type="time">
+                </div>
+                <div class="field">
+                  <label for="shift-end">Clock out</label>
+                  <input id="shift-end" name="endTime" type="time">
+                  <span class="field-error" id="times-error"></span>
+                </div>
+                <div class="field">
                   <label for="shift-hours">Hours worked</label>
                   <input id="shift-hours" name="hours" type="number" min="0.01" max="24" step="0.01" inputmode="decimal" placeholder="5.5" required>
                   <span class="field-error" id="hours-error"></span>
@@ -59,6 +68,7 @@
                   <span class="field-error" id="tips-error"></span>
                 </div>
               </div>
+              <p class="rate-help">Hours fill from the clock times. Edit them if you had an unpaid break.</p>
               <div class="form-actions">
                 <button class="primary-button" id="save-button" type="submit">Save shift <span aria-hidden="true">↗</span></button>
                 <button class="text-button" id="cancel-button" type="button" hidden>Cancel edit</button>
@@ -92,7 +102,12 @@
 
         <section class="history-section reconcile-section" aria-labelledby="reconcile-title">
           <div class="section-heading"><p class="eyebrow">04 / Compare</p><h2 id="reconcile-title">Reconcile a paystub</h2></div>
-          <p class="section-copy">Enter the totals printed on a Monday–Sunday paystub. The difference shows paystub minus logged shifts.</p>
+          <p class="section-copy">Select a Gusto earnings statement PDF to fill the totals, or enter them yourself. Review the numbers before saving. The PDF stays in this browser.</p>
+          <div class="pdf-import">
+            <label for="stub-pdf">Choose paystub PDF</label>
+            <input id="stub-pdf" type="file">
+            <p id="pdf-status" class="form-status" role="status" aria-live="polite"></p>
+          </div>
           <form id="stub-form" class="stub-form" novalidate>
             <div class="field"><label for="stub-start">Week starting Monday</label><select id="stub-start" required></select><span class="field-error" id="start-error"></span></div>
             <div class="field"><label for="stub-hours">Paystub hours</label><input id="stub-hours" type="number" min="0" step="0.01" inputmode="decimal" required><span class="field-error" id="stub-hours-error"></span></div>
@@ -108,7 +123,7 @@
           <div class="section-heading"><p class="eyebrow">05 / The details</p><h2 id="shifts-title">Your shifts</h2></div>
           <div class="table-wrap">
             <table>
-              <thead><tr><th>Date</th><th>Hours</th><th>Tips</th><th>Base / hr</th><th>Est. gross</th><th>Effective / hr</th><th><span class="sr-only">Actions</span></th></tr></thead>
+              <thead><tr><th>Shift</th><th>Hours</th><th>Tips</th><th>Base / hr</th><th>Est. gross</th><th>Effective / hr</th><th><span class="sr-only">Actions</span></th></tr></thead>
               <tbody id="shift-rows"><tr><td class="empty-cell" colspan="7">No shifts saved yet. Add one above to start your ledger.</td></tr></tbody>
             </table>
           </div>
